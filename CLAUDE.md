@@ -76,9 +76,6 @@ no code changes are needed.
 
 ## Repo conventions
 
-- Do not commit absolute paths, usernames, home-relative references, or
-  anything resolving outside the repo root into tracked files. Use
-  `<path-to-models>` or `./models/` as placeholders for model dirs.
 - `internal/` is gitignored; use it for local notes, wheel caches, or
   session logs that should not ship with the repo.
 - Prebuilt wheels for the Python-3.13 / torch-2.12 toolchain live in

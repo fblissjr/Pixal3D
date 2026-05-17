@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
 # Last updated: 2026-05-17
 #
-# Reproduce the Pixal3D environment built against:
-#   Python 3.13 + torch 2.12.0+cu132 + Ada (sm_89, RTX 4090) + CUDA toolkit 13.2
+# Reproduce the Pixal3D environment on Python 3.13 + torch 2.12+cu132.
 #
-# This is NOT the upstream-recommended stack. Upstream (TRELLIS.2 setup.sh)
-# uses Python 3.10 + torch 2.6 + cu124 and ships prebuilt cp310 wheels.
-# If you can use that combination, the prebuilt wheels in
-# requirements-hfdemo.txt will install in seconds. This script exists for
-# environments where downgrading is not an option — every CUDA extension
-# is rebuilt from source.
+# Upstream TRELLIS.2 ships prebuilt cp310 wheels (torch 2.6 + cu124); if
+# that combination is available, prefer `pip install -r requirements-hfdemo.txt`
+# instead — it installs in seconds rather than minutes.
 #
-# If you have prebuilt wheels for THIS exact toolchain (Python 3.13 +
-# torch 2.12 + cu132 + sm_89) cached in ./internal/wheels/, they will be
-# preferred over rebuilding. That directory is gitignored.
+# Prebuilt wheels for the Python-3.13 / torch-2.12 toolchain cached in
+# ./internal/wheels/ are used in preference to rebuilding. That directory
+# is gitignored.
 #
 # Requirements:
 #   - uv (https://docs.astral.sh/uv/)
@@ -28,21 +24,16 @@ cd "$REPO_ROOT"
 # ----------------------------------------------------------------------
 # 1. Virtualenv
 # ----------------------------------------------------------------------
-if [ ! -d .venv ]; then
-    uv venv --python 3.13
-fi
+uv venv --python 3.13
 PY="$REPO_ROOT/.venv/bin/python"
 export VIRTUAL_ENV="$REPO_ROOT/.venv"
 
 # ----------------------------------------------------------------------
 # 2. Torch + base Python deps
-#    Torch index is pytorch's cu132 wheels (which match this CUDA toolkit).
-#    Falls back to default PyPI if the cu132 index isn't reachable.
 # ----------------------------------------------------------------------
 uv pip install --python "$PY" \
     --index-url https://download.pytorch.org/whl/cu132 \
-    torch==2.12.0 torchvision==0.27.0 triton==3.7.0 || \
-uv pip install --python "$PY" torch torchvision triton
+    torch==2.12.0 torchvision==0.27.0 triton==3.7.0
 
 uv pip install --python "$PY" \
     pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless trimesh \
@@ -51,22 +42,20 @@ uv pip install --python "$PY" \
     ninja huggingface_hub safetensors einops
 
 # ----------------------------------------------------------------------
-# 3. MoGe (depth / camera estimation) + utils3d
-#    Order matters: install MoGe first (which git-pins upstream utils3d),
-#    then overlay LDYang694's utils3d wheel — it adds the `pt` alias for
-#    MoGe-v2 compatibility plus a `depth_map_to_point_map` helper that
-#    Pixal3D's pipeline calls. Pure-Python wheel.
+# 3. MoGe + utils3d
+# Order matters: MoGe git-pins upstream utils3d; the LDYang694 wheel
+# overlay adds the `pt` alias for MoGe-v2 plus a `depth_map_to_point_map`
+# helper that Pixal3D's pipeline calls.
 # ----------------------------------------------------------------------
 uv pip install --python "$PY" "git+https://github.com/microsoft/MoGe.git"
 uv pip install --python "$PY" --reinstall-package utils3d \
     "https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl"
 
 # ----------------------------------------------------------------------
-# 4. CUDA extensions — prefer cached wheels, otherwise build from source.
+# 4. CUDA extensions
+# Set TORCH_CUDA_ARCH_LIST for non-Ada GPUs (e.g. "8.0" A100, "9.0" H100,
+# "12.0" Blackwell). Unset = build every arch, which is slow.
 # ----------------------------------------------------------------------
-# Override TORCH_CUDA_ARCH_LIST below for non-Ada GPUs (e.g. "8.0" for A100,
-# "9.0" for H100, "12.0" for Blackwell). Leaving it unset will build for
-# every arch in torch's default list, which is slow but portable.
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.9}"
 export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 
@@ -74,26 +63,27 @@ WHEEL_DIR="$REPO_ROOT/internal/wheels"
 
 install_or_build () {
     local pkg="$1"
-    local glob="$2"
-    local src_spec="$3"
+    local src_spec="$2"
 
-    local cached
-    cached="$(ls "$WHEEL_DIR"/$glob 2>/dev/null | head -1 || true)"
-    if [ -n "$cached" ]; then
-        echo "[install] $pkg from cached wheel: $cached"
-        uv pip install --python "$PY" "$cached"
+    shopt -s nullglob
+    local matches=("$WHEEL_DIR/${pkg}-"*.whl)
+    shopt -u nullglob
+
+    if [ ${#matches[@]} -gt 0 ]; then
+        echo "[install] $pkg from cached wheel: ${matches[0]}"
+        uv pip install --python "$PY" "${matches[0]}"
     else
         echo "[build]   $pkg from source: $src_spec"
         uv pip install --python "$PY" --no-build-isolation "$src_spec"
     fi
 }
 
-install_or_build natten            "natten-0.21.0-*.whl"     "natten==0.21.0"
-install_or_build cumesh            "cumesh-*.whl"            "git+https://github.com/JeffreyXiang/CuMesh.git"
-install_or_build flex_gemm         "flex_gemm-*.whl"         "git+https://github.com/JeffreyXiang/FlexGEMM.git"
-install_or_build nvdiffrast        "nvdiffrast-*.whl"        "git+https://github.com/JeffreyXiang/nvdiffrast.git"
-install_or_build o_voxel           "o_voxel-*.whl"           "git+https://github.com/microsoft/TRELLIS.2.git#subdirectory=o-voxel"
-install_or_build nvdiffrec_render  "nvdiffrec_render-*.whl"  "git+https://github.com/JeffreyXiang/nvdiffrec.git@renderutils"
+install_or_build natten            "natten==0.21.0"
+install_or_build cumesh            "git+https://github.com/JeffreyXiang/CuMesh.git"
+install_or_build flex_gemm         "git+https://github.com/JeffreyXiang/FlexGEMM.git"
+install_or_build nvdiffrast        "git+https://github.com/JeffreyXiang/nvdiffrast.git"
+install_or_build o_voxel           "git+https://github.com/microsoft/TRELLIS.2.git#subdirectory=o-voxel"
+install_or_build nvdiffrec_render  "git+https://github.com/JeffreyXiang/nvdiffrec.git@renderutils"
 
 # ----------------------------------------------------------------------
 # 5. Smoke test
