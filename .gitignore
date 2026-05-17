@@ -24,3 +24,6 @@ env/
 Thumbs.db
 
 tmp
+
+# Internal notes & build artifacts (per CLAUDE.md)
+internal/
