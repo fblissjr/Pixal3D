@@ -2,6 +2,8 @@ import os
 import argparse
 import math
 import time
+from typing import Optional
+
 import torch
 import numpy as np
 import cv2
@@ -71,9 +73,9 @@ def load_moge_model(device="cuda", model_name=MOGE_MODEL_NAME):
     return moge_model
 
 
-def init_pipeline(model_path=MODEL_PATH, device="cuda", low_vram=False):
+def init_pipeline(model_path=MODEL_PATH, device="cuda", low_vram=False, rembg_model=None):
     print(f"[Pipeline] Loading from {model_path}...")
-    pipeline = Pixal3DImageTo3DPipeline.from_pretrained(model_path)
+    pipeline = Pixal3DImageTo3DPipeline.from_pretrained(model_path, rembg_override=rembg_model)
 
     print("[ImageCond] Building DinoV3ProjFeatureExtractor models...")
     pipeline.image_cond_model_ss = build_image_cond_model(IMAGE_COND_CONFIGS["ss"])
@@ -182,9 +184,12 @@ def run_inference(
     manual_fov: float = -1.0,
     low_vram: bool = False,
     resolution: int = -1,
+    rembg_model: Optional[str] = None,
+    texture_size: int = 2048,
+    decimation_target: int = 250000,
 ):
     # Load models
-    pipeline = init_pipeline(model_path, low_vram=low_vram)
+    pipeline = init_pipeline(model_path, low_vram=low_vram, rembg_model=rembg_model)
 
     # Preprocess image first — rembg loads to GPU for this call, then offloads.
     # MoGe is loaded afterwards so both never occupy VRAM at the same time.
@@ -264,7 +269,7 @@ def run_inference(
         vertices=mesh.vertices, faces=mesh.faces, attr_volume=mesh.attrs,
         coords=mesh.coords, attr_layout=pipeline.pbr_attr_layout,
         grid_size=res, aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
-        decimation_target=1000000, texture_size=4096,
+        decimation_target=decimation_target, texture_size=texture_size,
         remesh=True, remesh_band=1, remesh_project=0, use_tqdm=True,
     )
 
@@ -298,6 +303,29 @@ if __name__ == "__main__":
                              "Reduces peak VRAM from ~18GB to ~10-12GB at the cost of slower inference.")
     parser.add_argument("--resolution", type=int, default=-1,
                         help="Pipeline resolution (1024 or 1536). Default: 1024 if --low_vram, else 1536.")
+    parser.add_argument("--rembg_model", type=str, default=None,
+                        help="Override the background-removal model from pipeline.json "
+                             "(e.g. 'ZhengPeng7/BiRefNet' when 'briaai/RMBG-2.0' is gated).")
+
+    # Sampler tuning
+    parser.add_argument("--ss_steps", type=int, default=12, help="Sparse-structure sampling steps.")
+    parser.add_argument("--ss_guidance", type=float, default=7.5, help="Sparse-structure CFG strength.")
+    parser.add_argument("--ss_rescale", type=float, default=0.7, help="Sparse-structure CFG rescale.")
+    parser.add_argument("--shape_steps", type=int, default=12, help="Shape-SLAT sampling steps.")
+    parser.add_argument("--shape_guidance", type=float, default=7.5, help="Shape-SLAT CFG strength.")
+    parser.add_argument("--shape_rescale", type=float, default=0.5, help="Shape-SLAT CFG rescale.")
+    parser.add_argument("--tex_steps", type=int, default=12, help="Texture-SLAT sampling steps.")
+    parser.add_argument("--tex_guidance", type=float, default=1.0,
+                        help="Texture-SLAT CFG strength. 1.0 = no guidance. "
+                             "Try 1.5-2.0 for richer colors.")
+    parser.add_argument("--tex_rescale", type=float, default=0.0, help="Texture-SLAT CFG rescale.")
+
+    # GLB export
+    parser.add_argument("--texture_size", type=int, default=2048,
+                        help="UV texture resolution. 2048 is plenty for most uses; 4096 for max quality.")
+    parser.add_argument("--decimation_target", type=int, default=250000,
+                        help="Max face count after remeshing. 250k looks identical to 1M in most viewers "
+                             "and produces ~4x smaller GLBs.")
 
     args = parser.parse_args()
 
@@ -309,4 +337,16 @@ if __name__ == "__main__":
         model_path=args.model_path,
         low_vram=args.low_vram,
         resolution=args.resolution,
+        rembg_model=args.rembg_model,
+        ss_sampling_steps=args.ss_steps,
+        ss_guidance_strength=args.ss_guidance,
+        ss_guidance_rescale=args.ss_rescale,
+        shape_slat_sampling_steps=args.shape_steps,
+        shape_slat_guidance_strength=args.shape_guidance,
+        shape_slat_guidance_rescale=args.shape_rescale,
+        tex_slat_sampling_steps=args.tex_steps,
+        tex_slat_guidance_strength=args.tex_guidance,
+        tex_slat_guidance_rescale=args.tex_rescale,
+        texture_size=args.texture_size,
+        decimation_target=args.decimation_target,
     )

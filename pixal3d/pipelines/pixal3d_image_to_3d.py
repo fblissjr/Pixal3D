@@ -92,15 +92,25 @@ class Pixal3DImageTo3DPipeline(Pipeline):
         self._device = 'cpu'
 
     @classmethod
-    def from_pretrained(cls, path: str, config_file: str = "pipeline.json") -> "Pixal3DImageTo3DPipeline":
+    def from_pretrained(
+        cls,
+        path: str,
+        config_file: str = "pipeline.json",
+        rembg_override: Optional[str] = None,
+    ) -> "Pixal3DImageTo3DPipeline":
         """
         Load a pretrained model.
 
         Args:
             path (str): The path to the model. Can be either local path or a Hugging Face repository.
+            rembg_override (str): Override the rembg model name from pipeline.json.
+                Useful when the configured model (e.g. briaai/RMBG-2.0) is gated
+                and you want to fall back to the open ZhengPeng7/BiRefNet.
         """
         pipeline = super().from_pretrained(path, config_file)
         args = pipeline._pretrained_args
+        if rembg_override is not None:
+            args['rembg_model']['args']['model_name'] = rembg_override
 
         pipeline.sparse_structure_sampler = getattr(samplers, args['sparse_structure_sampler']['name'])(**args['sparse_structure_sampler']['args'])
         pipeline.sparse_structure_sampler_params = args['sparse_structure_sampler']['params']

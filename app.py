@@ -1,5 +1,4 @@
 import os
-import subprocess
 import argparse
 import math
 import time
@@ -539,7 +538,6 @@ app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
 
 if __name__ == "__main__":
-    import sys
     parser = argparse.ArgumentParser(description="Pixal3D Demo Server")
     parser.add_argument("--low_vram", action="store_true",
                         help="Enable low-VRAM mode: models lazy-load to GPU per stage.")
@@ -547,13 +545,5 @@ if __name__ == "__main__":
     if args.low_vram:
         LOW_VRAM = True
 
-    # Re-install utils3d as in original app.py
-    subprocess.run([
-        sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps",
-        "https://github.com/LDYang694/Storages/releases/download/20260430/utils3d-0.0.2-py3-none-any.whl"
-    ], check=True)
-    
-    # Pre-initialize models before launching the server
     init_models()
-    
     app.launch(show_error=True, share=True)
